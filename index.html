@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DCDD: Logit-Conditioned Diffusion Decoding for Frozen Discrete-Token VLMs</title>
+  <meta name="description" content="DCDD conditions a diffusion decoder on the pre-sampling logit distribution of a frozen discrete-token VLM, recovering fine detail that the native VQ-VAE decoder loses. NeurIPS 2026.">
+  <meta property="og:title" content="Logit-Conditioned Diffusion Decoding for Frozen Discrete-Token VLMs">
+  <meta property="og:description" content="A post-hoc diffusion decoder for discrete-token VLMs. The VLM stays frozen; reconstruction FID drops 74% and MJHQ-30K generation FID drops 34% on Janus-Pro 7B.">
+  <meta property="og:image" content="https://jiwoohong93.github.io/dcdd/static/images/teaser.jpg">
+  <meta property="og:type" content="website">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="icon" href="static/images/favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Source+Serif+4:ital,wght@0,400;0,600;0,700;1,400&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="static/css/style.css">
+</head>
+<body>
+
+<nav id="nav">
+  <div class="nav-inner">
+    <a class="nav-brand" href="#top">DCDD</a>
+    <button id="nav-toggle" aria-label="Toggle navigation">&#9776;</button>
+    <div class="nav-links" id="nav-links">
+      <a href="#overview">Overview</a>
+      <a href="#motivation">Motivation</a>
+      <a href="#method">Method</a>
+      <a href="#results">Results</a>
+      <a href="#compare">Compare</a>
+      <a href="#bibtex">BibTeX</a>
+    </div>
+  </div>
+</nav>
+
+<header class="hero" id="top">
+  <div class="container">
+    <div class="venue">NeurIPS 2026 <i>&middot;</i> Sydney, Australia</div>
+    <h1 class="title">Logit-Conditioned Diffusion Decoding<br>for Frozen Discrete-Token VLMs</h1>
+    <p class="subtitle">Improving Visual Fidelity Without Retraining the VLM</p>
+
+    <div class="authors">
+      <a href="https://jiwoohong93.github.io/">Ji Woo Hong<sup>1*</sup></a>
+      <a href="https://kookie12.github.io/">Gwanhyeong Koo<sup>1</sup></a>
+      <a href="https://hee-suk-yoon.github.io/">Hee Suk Yoon<sup>1</sup></a>
+      <a href="https://esyoon7.github.io/">Eunseop Yoon<sup>1</sup></a>
+      <a href="https://eomsoohwan.github.io/">SooHwan Eom<sup>1</sup></a>
+      <a href="https://www.microsoft.com/en-us/research/people/qid/">Qi Dai<sup>2</sup></a>
+      <a href="https://www.microsoft.com/en-us/research/people/cluo/">Chong Luo<sup>2&dagger;</sup></a>
+      <a href="http://sanctusfactory.com/family.php">Chang D. Yoo<sup>1&dagger;</sup></a>
+    </div>
+    <div class="affil">
+      <span><sup>1</sup>Korea Advanced Institute of Science and Technology (KAIST)</span>
+      <span><sup>2</sup>Microsoft Research Asia (MSRA)</span>
+    </div>
+    <div class="notes"><sup>*</sup>Work done during an internship at MSRA &nbsp;&nbsp; <sup>&dagger;</sup>Corresponding authors</div>
+
+    <div class="links">
+      <a class="btn" href="https://arxiv.org/abs/2603.13389" target="_blank" rel="noopener">
+        <svg viewBox="0 0 24 24"><path d="M6 2h9l5 5v15H6zM14 3.5V8h4.5M8 12h8v1.5H8zm0 3h8v1.5H8zm0 3h5v1.5H8z"/></svg>
+        arXiv
+      </a>
+      <a class="btn" href="https://arxiv.org/pdf/2603.13389" target="_blank" rel="noopener">
+        <svg viewBox="0 0 24 24"><path d="M5 3h10l4 4v14H5zm9 1.5V8h3.5M7.5 11h9v1.4h-9zm0 3h9v1.4h-9zm0 3h6v1.4h-6z"/></svg>
+        Paper
+      </a>
+      <a class="btn" href="https://github.com/jiwoohong93/dcdd_code" target="_blank" rel="noopener">
+        <svg viewBox="0 0 24 24"><path d="M12 .5A11.5 11.5 0 0 0 .5 12a11.5 11.5 0 0 0 7.9 10.9c.6.1.8-.3.8-.6v-2c-3.2.7-3.9-1.4-3.9-1.4-.5-1.3-1.3-1.7-1.3-1.7-1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.7 1.3 3.4 1 .1-.8.4-1.3.7-1.6-2.6-.3-5.3-1.3-5.3-5.7 0-1.3.5-2.3 1.2-3.1-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.2 1.2a11 11 0 0 1 5.8 0c2.2-1.5 3.2-1.2 3.2-1.2.6 1.6.2 2.8.1 3.1.8.8 1.2 1.8 1.2 3.1 0 4.4-2.7 5.4-5.3 5.7.4.4.8 1.1.8 2.2v3.2c0 .3.2.7.8.6A11.5 11.5 0 0 0 23.5 12 11.5 11.5 0 0 0 12 .5z"/></svg>
+        Code
+      </a>
+      <a class="btn secondary" href="#bibtex">
+        <svg viewBox="0 0 24 24"><path d="M7 4h10a2 2 0 0 1 2 2v14l-7-3-7 3V6a2 2 0 0 1 2-2z"/></svg>
+        BibTeX
+      </a>
+    </div>
+  </div>
+
+  <div class="teaser">
+    <div class="teaser-legend"><span>Rows 1&ndash;2: Text-to-image generation</span><span class="sep" aria-hidden="true"></span><span>Row 3: Reconstruction</span></div>
+    <img src="static/images/teaser.jpg" alt="Text-to-image and reconstruction samples on Janus-Pro 7B: native VQ-VAE decoder versus DCDD on identical tokens">
+    <p class="caption">Same tokens, different decoder. Each pair decodes the <b>same</b> Janus-Pro 7B token sequence (bottom row: the same encoded image). <span class="tag-vq">VQ-VAE decoder</span> is the native path, <span class="tag-ours">DCDD</span> is ours. The VLM is never retrained.</p>
+  </div>
+</header>
+
+<!-- OVERVIEW -->
+<section class="section" id="overview">
+  <div class="container text">
+    <h2>Overview</h2>
+    <p class="tldr">Discrete-token vision-language models such as Janus-Pro generate images by predicting sequences of codebook indices and decoding them with a VQ-VAE decoder. This design unifies language and image modeling, but visual fidelity remains limited by the discrete-token decoding stage, often resulting in distorted text, facial artifacts, and blurred textures even when the generated semantics are correct. Prior approaches address this limitation by replacing discrete tokenizers with continuous or hybrid representations, or by integrating diffusion into the generation pipeline. However, these approaches require retraining or realigning the VLM itself.</p>
+    <p class="tldr">DCDD (Distribution-Conditioned Diffusion Decoder) takes a different route. Before sampling each image token, the VLM computes a full logit distribution over the codebook, but standard decoding retains only the sampled index, discarding the richer distributional information. <b>These distributions capture the VLM's relative preferences across multiple plausible visual tokens, providing richer information than any single sampled index.</b> We show that this discarded information provides a valuable conditioning signal for a diffusion decoder. At inference, DCDD converts the VLM's pre-sampling logits into distribution-weighted code vectors to condition the diffusion decoder. During training, proxy logits derived from the VQ-VAE encoder are calibrated to approximate the statistical properties of the VLM's logits, eliminating the need for VLM forward passes over the training dataset. <b>The VLM remains frozen, the diffusion decoder is trained solely on ImageNet-1K, and it can optionally replace the native VQ-VAE decoder without modifying the VLM.</b> On Janus-Pro 7B, DCDD reduces reconstruction FID by 74% and MJHQ-30K generation FID by 34%, while preserving performance on GenEval, DPG-Bench, and WISE.</p>
+
+    <div class="stats three">
+      <div class="stat"><div class="num">&minus;74%</div><div class="lbl"><b>Reconstruction FID</b><br>ImageNet-1K val, 2.85 &rarr; 0.75</div></div>
+      <div class="stat"><div class="num">&minus;34%</div><div class="lbl"><b>Generation FID</b><br>MJHQ-30K, 14.29 &rarr; 9.42</div></div>
+      <div class="stat"><div class="num">0</div><div class="lbl"><b>VLM parameters changed</b><br>semantics preserved (GenEval, DPG, WISE)</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- IDEA -->
+<section class="section alt" id="motivation">
+  <div class="container">
+    <h2>Motivation</h2>
+    <p class="sec-intro">Three observations motivate the approach.</p>
+
+    <figure>
+      <img src="static/images/problem.jpg" alt="The VQ-VAE decoder is the fidelity bottleneck: reconstruction and text-to-image examples">
+      <figcaption><b>The discrete-token decoding pipeline limits achievable fidelity.</b> (a) Even with the VLM bypassed, VQ-VAE reconstruction loses fine-grained details such as text and facial features. (b) Similar artifacts appear in images generated by the VLM. DCDD addresses this limitation without modifying the VLM.</figcaption>
+    </figure>
+
+    <div class="insights">
+      <div class="insight">
+        <span class="n">1</span>
+        <h4>Fidelity is limited by discrete-token reconstruction</h4>
+        <p>Encoding an image into discrete tokens and reconstructing it without the VLM already introduces visible losses in text, faces, and textures. This suggests that improving the decoding pipeline can enhance visual fidelity without retraining the VLM.</p>
+        <span class="fact">Detail loss occurs even without the VLM</span>
+      </div>
+      <div class="insight">
+        <span class="n">2</span>
+        <h4>The VLM knows more than the token it samples</h4>
+        <p>Before sampling, the VLM assigns meaningful probability to multiple codebook entries, rather than concentrating entirely on a single token. Standard decoding retains only the sampled index, discarding these additional preferences.</p>
+        <span class="fact">Informative probability mass beyond the sampled token</span>
+      </div>
+      <div class="insight">
+        <span class="n">3</span>
+        <h4>Condition the decoder on the full distribution</h4>
+        <p>Instead of conditioning on a single token index, DCDD uses a probability-weighted combination of codebook vectors along with distributional uncertainty features to guide a diffusion decoder.</p>
+        <span class="fact">No change to the VLM or its tokenizer</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- METHOD -->
+<section class="section" id="method">
+  <div class="container">
+    <h2>Method</h2>
+    <p class="sec-intro">Only the diffusion decoder is trained. Each of the three components answers one practical question.</p>
+    <figure>
+      <img src="static/images/overview.png" alt="DCDD overview: comparison of strategies and the inference/training pipelines">
+      <figcaption><b>Left:</b> prior routes to higher fidelity (a, b) retrain the VLM; DCDD (c) trains only the decoder. <b>Right:</b> at inference the VLM's logits become the decoder's conditioning. At training, encoder proxy logits are first calibrated to look like the VLM's.</figcaption>
+    </figure>
+
+    <div class="cards">
+      <div class="card compact">
+        <div class="kicker">LCDM &middot; Logit-to-Code Distributional Mapping</div>
+        <p class="one">How do logits become a conditioning signal?</p>
+        <p>A softmax over the codebook turns each token's logits into a probability-weighted mixture of codebook embeddings. A few scalar uncertainty features preserve how peaked or spread the distribution is.</p>
+      </div>
+      <div class="card compact">
+        <div class="kicker">LC &middot; Logit Calibration</div>
+        <p class="one">How do we train without running the VLM on every image?</p>
+        <p>Training uses proxy logits from the VQ-VAE encoder, which are far flatter than the VLM's. A gradient-free calibration aligns their distributional statistics with those of the VLM's logits, reducing the conditioning mismatch between training and inference.</p>
+        <p class="why-note"><b>Why it matters.</b> Logit calibration enables decoder training using only VQ-VAE encoder outputs, without running the frozen VLM over the training dataset.</p>
+      </div>
+      <div class="card compact">
+        <div class="kicker">DD &middot; Diffusion Decoder</div>
+        <p class="one">What renders the final image?</p>
+        <p>A pre-trained FLUX.1-Fill model fine-tuned to render images from the code vectors and uncertainty maps. The decoder uses only VLM-derived token distributions, without direct text conditioning, to enhance visual fidelity while preserving the VLM's intended semantics.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- RESULTS -->
+<section class="section alt" id="results">
+  <div class="container">
+    <h2>Results</h2>
+    <p class="sec-intro">Janus-Pro 7B, 384&times;384, decoder trained 50K steps on ImageNet-1K. Fidelity improves sharply; semantic scores stay where they were or edge up.</p>
+
+    <div class="results-grid">
+      <div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Metric</th><th>VQ-VAE decoder</th><th>DCDD</th><th>Change</th></tr></thead>
+            <tbody>
+              <tr class="grp"><th colspan="4">Reconstruction fidelity</th></tr>
+              <tr><td>rFID, ImageNet-1K &darr;</td><td>2.85</td><td class="best">0.75</td><td class="delta good">&minus;74%</td></tr>
+              <tr><td>rFID, MJHQ-30K &darr;</td><td>4.49</td><td class="best">1.81</td><td class="delta good">&minus;60%</td></tr>
+              <tr class="grp"><th colspan="4">Generation fidelity</th></tr>
+              <tr><td>gFID, MJHQ-30K &darr;</td><td>14.29</td><td class="best">9.42</td><td class="delta good">&minus;34%</td></tr>
+              <tr class="grp"><th colspan="4">Semantic alignment</th></tr>
+              <tr><td>GenEval &uarr;</td><td>77.24</td><td class="best">78.31</td><td class="delta flat">+1.07</td></tr>
+              <tr><td>DPG-Bench &uarr;</td><td>86.94</td><td class="best">87.64</td><td class="delta flat">+0.70</td></tr>
+              <tr><td>WISE consistency &uarr;</td><td>1.278</td><td class="best">1.320</td><td class="delta flat">+0.042</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="notes">
+        <p><b>Cross-domain generalization.</b> The decoder is trained on ImageNet-1K only and never sees MJHQ-30K, so the MJHQ rows measure transfer to a different image distribution. Semantic benchmarks (GenEval, DPG-Bench, WISE) are preserved rather than traded for fidelity.</p>
+        <p><b>Computational overhead.</b> At 30 denoising steps, DCDD adds 31% end-to-end latency (11.9 s &rarr; 15.6 s per image on an A100) in exchange for the 34% gFID reduction above. With 10 steps the overhead drops to about 11% while reconstruction still outperforms the native decoder on every metric. In both settings the frozen VLM accounts for most of the inference time.</p>
+        <p><b>Transferability across VLM scales.</b> The diffusion decoder trained for Janus-Pro 7B can be reused with Janus-Pro 1B, which shares the same tokenizer and exhibits similarly structured token distributions, without additional decoder training (MJHQ-30K Animals gFID 35.14 &rarr; 26.09).</p>
+      </div>
+    </div>
+
+    <h3 class="why-h">Why does DCDD work?</h3>
+    <p class="sec-intro">The improvement comes not only from diffusion-based decoding, but also from preserving the VLM's distributional information.</p>
+
+    <div class="why-item">
+      <h4>1. The full distribution matters</h4>
+      <div class="fid-tiles" role="img" aria-label="MJHQ-30K generation FID: native VQ-VAE decoder 14.29, diffusion decoder with argmax codes 11.08, DCDD with full logits 9.42">
+        <div class="tile"><div class="t-lab">Native VQ-VAE</div><div class="t-num">14.29</div><div class="t-sub">Hard token decoding</div></div>
+        <div class="tile"><div class="t-lab">Diffusion + argmax</div><div class="t-num">11.08</div><div class="t-sub">Diffusion prior only</div></div>
+        <div class="tile ours"><div class="t-lab">DCDD (full logits)</div><div class="t-num">9.42</div><div class="t-sub">Distribution conditioning</div></div>
+      </div>
+      <div class="tile-cap">MJHQ-30K generation FID &darr; (lower is better). The two diffusion variants share the same decoder, initialization, training data, and schedule; only the conditioning differs.</div>
+      <p>Conditioning on the full distribution improves generation fidelity beyond what diffusion-based decoding alone achieves: a further 15% reduction in gFID and 36% in ImageNet-1K rFID relative to the argmax-conditioned decoder.</p>
+    </div>
+
+    <div class="why-grid">
+      <div class="why-item">
+        <h4>2. Information beyond the top-1 token matters</h4>
+        <p>Using only the top-2 codebook entries recovers 76% of the improvement from argmax to full-distribution conditioning, consistent with our Otsu-based analysis showing that capable VLMs assign meaningful probability to multiple tokens.</p>
+      </div>
+      <div class="why-item">
+        <h4>3. Better fidelity without reinterpreting the prompt</h4>
+        <p>Compared with image-space refinement using FLUX.1-Kontext on the VQ-VAE output, DCDD achieves lower gFID (9.42 vs. 10.67) and higher CLIP-I consistency with the VLM's intended content (0.909 vs. 0.875).</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- COMPARE -->
+<section class="section" id="compare">
+  <div class="container">
+    <h2>Interactive Comparison</h2>
+    <p class="sec-intro">Drag the slider: <span class="tag-vq">VQ-VAE decoder</span> on the left, <span class="tag-ours">DCDD</span> on the right, decoded from the same tokens. Reconstruction samples also show the ground truth, and the side-by-side view places all images next to each other.</p>
+    <div class="compare">
+      <div class="compare-tools">
+        <span class="tools-lab">View</span>
+        <span class="view-toggle" role="group" aria-label="View mode"><button type="button" data-view="slider" class="active">Slider</button><button type="button" data-view="sbs">Side by side</button></span>
+      </div>
+      <div class="compare-top">
+        <span class="group">Text-to-image</span>
+        <span data-chips="t2i" style="display:contents"></span>
+      </div>
+      <div class="compare-top">
+        <span class="group">Reconstruction</span>
+        <span data-chips="recon" style="display:contents"></span>
+      </div>
+      <div class="compare-body">
+        <div class="cmp" tabindex="0" aria-label="Before and after comparison slider. Use arrow keys to move.">
+          <img class="before" src="static/images/compare/a_vq.jpg" alt="">
+          <img class="after" src="static/images/compare/a_dcdd.jpg" alt="">
+          <div class="handle"></div>
+          <div class="knob"><svg viewBox="0 0 24 24"><path d="M8.5 5 2 12l6.5 7v-4.5h7V19L22 12l-6.5-7v4.5h-7z"/></svg></div>
+          <span class="lab l">VQ-VAE decoder</span>
+          <span class="lab r">DCDD (ours)</span>
+        </div>
+        <div class="gt-pane" hidden>
+          <img alt="">
+          <div class="lab">Ground truth</div>
+        </div>
+        <div class="sbs-pane" hidden>
+          <figure class="sbs-item gt"><img alt=""><figcaption>Ground truth</figcaption></figure>
+          <figure class="sbs-item vq"><img alt=""><figcaption>VQ-VAE decoder</figcaption></figure>
+          <figure class="sbs-item ours"><img alt=""><figcaption>DCDD (ours)</figcaption></figure>
+        </div>
+      </div>
+      <div class="compare-foot">
+        <span class="prompt"></span>
+        <span class="kind"></span>
+      </div>
+    </div>
+    <p class="hint">Samples from the paper (Janus-Pro 7B, 384&times;384). More results, ablations, and limitations are in the <a href="https://arxiv.org/abs/2603.13389">paper</a>.</p>
+  </div>
+</section>
+
+<!-- BIBTEX -->
+<section class="section alt" id="bibtex">
+  <div class="container text">
+    <h2>BibTeX</h2>
+    <pre><button class="copy-btn" id="copy-bib" type="button">Copy</button><code id="bibtex-text">@inproceedings{hong2026dcdd,
+  title     = {Logit-Conditioned Diffusion Decoding for Frozen Discrete-Token {VLMs}},
+  author    = {Hong, Ji Woo and Koo, Gwanhyeong and Yoon, Hee Suk and Yoon, Eunseop and Eom, SooHwan and Dai, Qi and Luo, Chong and Yoo, Chang D.},
+  booktitle = {Advances in Neural Information Processing Systems (NeurIPS)},
+  year      = {2026}
+}</code></pre>
+
+    <h3>Acknowledgements</h3>
+    <p>This research was supported by the MSIT (Ministry of Science, ICT), Korea, under the Global Research Support Program in the Digital Field program (RS-2024-00436680) supervised by the IITP (Institute for Information &amp; Communications Technology Planning &amp; Evaluation). This project is supported by Microsoft Research Asia.</p>
+    <p>DCDD builds on <a href="https://github.com/deepseek-ai/Janus">Janus</a>, <a href="https://huggingface.co/black-forest-labs/FLUX.1-Fill-dev">FLUX.1-Fill-dev</a>, and <a href="https://github.com/huggingface/diffusers">Diffusers</a>. We thank the authors for releasing their models and code.</p>
+  </div>
+</section>
+
+<footer>
+  <div class="container">
+    DCDD &middot; NeurIPS 2026 &middot; KAIST &middot; Microsoft Research Asia<br>
+    <a href="https://github.com/jiwoohong93/dcdd_code">Code</a> &middot; <a href="https://arxiv.org/abs/2603.13389">arXiv</a>
+  </div>
+</footer>
+
+<script src="static/js/main.js"></script>
+</body>
+</html>

@@ -83,7 +83,7 @@
   <div class="teaser">
     <div class="teaser-legend"><span>Rows 1&ndash;2: Text-to-image generation</span><span class="sep" aria-hidden="true"></span><span>Row 3: Reconstruction</span></div>
     <img src="static/images/teaser.jpg" alt="Text-to-image and reconstruction samples on Janus-Pro 7B: native VQ-VAE decoder versus DCDD on identical tokens">
-    <p class="caption">Same tokens, different decoder. Each pair decodes the <b>same</b> Janus-Pro 7B token sequence (bottom row: the same encoded image). <span class="tag-vq">VQ-VAE decoder</span> is the native path, <span class="tag-ours">DCDD</span> is ours. The VLM is never retrained.</p>
+    <p class="caption">Same VLM output, different decoder. Each pair starts from the <b>same</b> Janus-Pro 7B sampling run (bottom row: the same encoded image). <span class="tag-vq">VQ-VAE decoder</span> is the native path, <span class="tag-ours">DCDD</span> is ours. The VLM is never retrained.</p>
   </div>
 </header>
 
@@ -207,7 +207,7 @@
     </div>
 
     <h3 class="sub-h">What each component adds</h3>
-    <p class="sec-intro">ImageNet-1K reconstruction with decoders trained for 10K steps. Same image, same tokens; only the conditioning pipeline differs.</p>
+    <p class="sec-intro">ImageNet-1K reconstruction with decoders trained for 10K steps. Same image, same encoder outputs; only the conditioning pipeline differs.</p>
     <div class="comp-grid">
       <figure class="comp"><img src="static/images/components/a.jpg" alt="Diffusion decoder conditioned on one code per token"><figcaption><b><span class="t-dd">Diffusion decoder</span> only</b><span>One code per token: noisy, broken textures.</span></figcaption></figure>
       <figure class="comp"><img src="static/images/components/b.jpg" alt="DCDD without logit calibration"><figcaption><b>+ <span class="t-lcdm">LCDM</span>, without <span class="t-lc">LC</span></b><span>Structure returns; contrast and color noise remain.</span></figcaption></figure>
@@ -306,7 +306,7 @@
 <section class="section" id="compare">
   <div class="container">
     <h2>Interactive Comparison</h2>
-    <p class="sec-intro">Drag the slider: <span class="tag-vq">VQ-VAE decoder</span> on the left, <span class="tag-ours">DCDD</span> on the right, decoded from the same tokens. Reconstruction samples also show the ground truth, and the side-by-side view places all images next to each other.</p>
+    <p class="sec-intro">Drag the slider: <span class="tag-vq">VQ-VAE decoder</span> on the left, <span class="tag-ours">DCDD</span> on the right, decoded from the same VLM outputs. Reconstruction samples also show the ground truth, and the side-by-side view places all images next to each other.</p>
     <div class="compare">
       <div class="compare-tools">
         <span class="tools-lab">View</span>

@@ -94,10 +94,17 @@
     <p class="tldr">Discrete-token vision-language models such as Janus-Pro generate images by predicting sequences of codebook indices and decoding them with a VQ-VAE decoder. This design unifies language and image modeling, but visual fidelity remains limited by the discrete-token decoding stage, often resulting in distorted text, facial artifacts, and blurred textures even when the generated semantics are correct. Prior approaches address this limitation by replacing discrete tokenizers with continuous or hybrid representations, or by integrating diffusion into the generation pipeline. However, these approaches require retraining or realigning the VLM itself.</p>
     <p class="tldr">DCDD (Distribution-Conditioned Diffusion Decoder) takes a different route. Before sampling each image token, the VLM computes a full logit distribution over the codebook, but standard decoding retains only the sampled index, discarding the richer distributional information. <b>These distributions capture the VLM's relative preferences across multiple plausible visual tokens, providing richer information than any single sampled index.</b> We show that this discarded information provides a valuable conditioning signal for a diffusion decoder. At inference, DCDD converts the VLM's pre-sampling logits into distribution-weighted code vectors to condition the diffusion decoder. During training, proxy logits derived from the VQ-VAE encoder are calibrated to approximate the statistical properties of the VLM's logits, eliminating the need for VLM forward passes over the training dataset. <b>The VLM remains frozen, the diffusion decoder is trained solely on ImageNet-1K, and it can optionally replace the native VQ-VAE decoder without modifying the VLM.</b> On Janus-Pro 7B, DCDD reduces reconstruction FID by 74% and MJHQ-30K generation FID by 34%, while preserving performance on GenEval, DPG-Bench, and WISE.</p>
 
-    <div class="stats three">
-      <div class="stat"><div class="num">&minus;74%</div><div class="lbl"><b>Reconstruction FID</b><br>ImageNet-1K val, 2.85 &rarr; 0.75</div></div>
-      <div class="stat"><div class="num">&minus;34%</div><div class="lbl"><b>Generation FID</b><br>MJHQ-30K, 14.29 &rarr; 9.42</div></div>
-      <div class="stat"><div class="num">0</div><div class="lbl"><b>VLM parameters changed</b><br>semantics preserved (GenEval, DPG, WISE)</div></div>
+    <div class="pstrip">
+      <div class="sc">
+        <div class="gl">Image quality (fidelity) &middot; lower is better</div>
+        <div class="it"><span class="n">&minus;74%</span><span class="l">rFID, ImageNet-1K</span></div>
+        <div class="it"><span class="n">&minus;34%</span><span class="l">gFID, MJHQ-30K</span></div>
+      </div>
+      <div class="sc g">
+        <div class="gl keep">Semantics of VLM &middot; kept, as intended</div>
+        <div class="it"><span class="n">+1.1</span><span class="l">GenEval, same semantics</span></div>
+        <div class="it"><span class="n">0</span><span class="l">VLM parameters changed</span></div>
+      </div>
     </div>
   </div>
 </section>
@@ -106,30 +113,63 @@
 <section class="section alt" id="motivation">
   <div class="container">
     <h2>Motivation</h2>
-    <p class="sec-intro">Three observations motivate the approach.</p>
+    <p class="sec-intro">Where the detail is lost, and what the VLM knows that standard decoding throws away.</p>
+
+    <div class="pipe-wrap">
+      <div class="pipe" role="img" aria-label="A text prompt goes into the discrete-token VLM, which outputs image tokens. The VQ-VAE decoder turns the tokens into an image and is where detail is lost.">
+        <div class="pn"><div class="ic"><div class="pq">&ldquo;a kitten dressed as a&nbsp;chef&rdquo;</div></div><div class="pl"><b>Input</b><br>text prompt</div></div>
+        <span class="pa">&rarr;</span>
+        <div class="pn"><div class="ic"><div class="pbx vlmbox">Discrete-token<br>VLM</div></div></div>
+        <span class="pa">&rarr;</span>
+        <div class="pn"><div class="ic"><svg class="grid" viewBox="0 0 136 136" aria-hidden="true"><rect x="6" y="6" width="26" height="26" rx="4" fill="#9fd0f0"/><rect x="37" y="6" width="26" height="26" rx="4" fill="#5fb0e6"/><rect x="68" y="6" width="26" height="26" rx="4" fill="#c6e4f7"/><rect x="99" y="6" width="26" height="26" rx="4" fill="#7cc0ec"/><rect x="6" y="37" width="26" height="26" rx="4" fill="#5fb0e6"/><rect x="37" y="37" width="26" height="26" rx="4" fill="#b4dbf4"/><rect x="68" y="37" width="26" height="26" rx="4" fill="#8bc8ee"/><rect x="99" y="37" width="26" height="26" rx="4" fill="#c6e4f7"/><rect x="6" y="68" width="26" height="26" rx="4" fill="#c6e4f7"/><rect x="37" y="68" width="26" height="26" rx="4" fill="#9fd0f0"/><rect x="68" y="68" width="26" height="26" rx="4" fill="#5fb0e6"/><rect x="99" y="68" width="26" height="26" rx="4" fill="#8bc8ee"/><rect x="6" y="99" width="26" height="26" rx="4" fill="#7cc0ec"/><rect x="37" y="99" width="26" height="26" rx="4" fill="#b4dbf4"/><rect x="68" y="99" width="26" height="26" rx="4" fill="#9fd0f0"/><rect x="99" y="99" width="26" height="26" rx="4" fill="#5fb0e6"/></svg></div><div class="pl">image tokens<br>(code indices)</div></div>
+        <span class="pa">&rarr;</span>
+        <div class="pn"><div class="ic"><div class="pbx bad">VQ-VAE<br>decoder</div></div><div class="pl bad">bottleneck</div></div>
+        <span class="pa">&rarr;</span>
+        <div class="pn"><div class="ic"><img class="pimg" src="static/images/pipe_out.jpg" alt=""></div><div class="pl"><b>Output</b><br>image<br><span class="bad">detail lost</span></div></div>
+      </div>
+      <p class="pipe-cap">The standard text-to-image path of a discrete-token VLM. DCDD replaces only the last step.</p>
+    </div>
 
     <figure>
       <img src="static/images/problem.jpg" alt="The VQ-VAE decoder is the fidelity bottleneck: reconstruction and text-to-image examples">
-      <figcaption><b>The discrete-token decoding pipeline limits achievable fidelity.</b> (a) Even with the VLM bypassed, VQ-VAE reconstruction loses fine-grained details such as text and facial features. (b) Similar artifacts appear in images generated by the VLM. DCDD addresses this limitation without modifying the VLM.</figcaption>
+      <figcaption><b>The VQ-VAE decoder caps fidelity.</b> (a) Even with no VLM involved, the VQ-VAE alone loses detail on a real image: text and facial features degrade. (b) Images generated by the VLM pass through the same decoder and lose the same detail. DCDD addresses this without modifying the VLM.</figcaption>
     </figure>
 
     <div class="insights">
       <div class="insight">
         <span class="n">1</span>
-        <h4>Fidelity is limited by discrete-token reconstruction</h4>
-        <p>Encoding an image into discrete tokens and reconstructing it without the VLM already introduces visible losses in text, faces, and textures. This suggests that improving the decoding pipeline can enhance visual fidelity without retraining the VLM.</p>
-        <span class="fact">Detail loss occurs even without the VLM</span>
+        <h4>Detail is lost in the token-to-pixel step</h4>
+        <p>Encoding a real image into discrete tokens and decoding it back, without the VLM, already loses text, faces, and textures. The bottleneck is the decoder, not the VLM, so the decoder is where fidelity can be recovered without retraining.</p>
+        <span class="fact">Bottleneck: the VQ-VAE decoder</span>
       </div>
       <div class="insight">
         <span class="n">2</span>
-        <h4>The VLM knows more than the token it samples</h4>
-        <p>Before sampling, the VLM assigns meaningful probability to multiple codebook entries, rather than concentrating entirely on a single token. Standard decoding retains only the sampled index, discarding these additional preferences.</p>
-        <span class="fact">Informative probability mass beyond the sampled token</span>
+        <h4>The VLM outputs a distribution; decoding keeps one entry</h4>
+        <p>Before sampling each image token, the VLM produces a probability distribution over all codebook entries. Standard decoding keeps a single entry and discards the rest.</p>
+        <div class="dist" role="img" aria-label="Average probability per position on Janus-Pro 7B: top-1 code 0.22, second code 0.10, all other codes 0.68">
+          <svg viewBox="0 0 300 92">
+            <text x="0" y="11" font-size="10.5" font-weight="700" fill="#2e9a4f">top-1</text>
+            <text x="68" y="11" font-size="10" fill="#5c6572">2nd</text>
+            <text x="100" y="11" font-size="10.5" fill="#5c6572">other codes (long tail)</text>
+            <rect x="0" y="17" width="66" height="26" rx="3" fill="#2e9a4f"/>
+            <rect x="67" y="17" width="29" height="26" fill="#b8bfc9"/>
+            <rect x="97" y="17" width="203" height="26" rx="3" fill="#e4e7ee"/>
+            <text x="33" y="35" font-size="12" font-weight="700" fill="#fff" text-anchor="middle">0.22</text>
+            <text x="81.5" y="35" font-size="10.5" font-weight="600" fill="#1b1f27" text-anchor="middle">0.10</text>
+            <text x="198" y="35" font-size="12" font-weight="700" fill="#1b1f27" text-anchor="middle">0.68</text>
+            <line x1="1" y1="50" x2="65" y2="50" stroke="#2e9a4f" stroke-width="2"/>
+            <line x1="68" y1="50" x2="299" y2="50" stroke="#c0392b" stroke-width="2"/>
+            <text x="33" y="64" font-size="10.5" font-weight="700" fill="#2e9a4f" text-anchor="middle">kept</text>
+            <text x="183" y="64" font-size="10.5" font-weight="700" fill="#c0392b" text-anchor="middle">discarded by one-code decoding</text>
+            <text x="0" y="86" font-size="9.5" fill="#5c6572">Avg. probability per position &middot; Janus-Pro 7B, all positions</text>
+          </svg>
+        </div>
+        <span class="fact">The most likely code holds only 22% of the probability mass; one-code decoding discards the remaining 78%</span>
       </div>
       <div class="insight">
         <span class="n">3</span>
         <h4>Condition the decoder on the full distribution</h4>
-        <p>Instead of conditioning on a single token index, DCDD uses a probability-weighted combination of codebook vectors along with distributional uncertainty features to guide a diffusion decoder.</p>
+        <p>DCDD conditions a diffusion decoder on a probability-weighted combination of codebook vectors plus per-token uncertainty features, not on one code. Only the decoder changes; the VLM remains unchanged.</p>
         <span class="fact">No change to the VLM or its tokenizer</span>
       </div>
     </div>
@@ -145,24 +185,34 @@
       <img src="static/images/overview.png" alt="DCDD overview: comparison of strategies and the inference/training pipelines">
       <figcaption><b>Left:</b> prior routes to higher fidelity (a, b) retrain the VLM; DCDD (c) trains only the decoder. <b>Right:</b> at inference the VLM's logits become the decoder's conditioning. At training, encoder proxy logits are first calibrated to look like the VLM's.</figcaption>
     </figure>
+    <div class="pills"><span class="pill">Training: ImageNet-1K only, 50K steps</span><span class="pill">Inference: swap the VQ-VAE decoder for DCDD; the VLM is unchanged</span></div>
 
     <div class="cards">
-      <div class="card compact">
-        <div class="kicker">LCDM &middot; Logit-to-Code Distributional Mapping</div>
+      <div class="card compact c-lcdm">
+        <div class="kicker"><span class="abbr">LCDM</span><span class="kname">Logit-to-Code Distributional Mapping</span></div>
         <p class="one">How do logits become a conditioning signal?</p>
-        <p>A softmax over the codebook turns each token's logits into a probability-weighted mixture of codebook embeddings. A few scalar uncertainty features preserve how peaked or spread the distribution is.</p>
+        <p><b>Decode from a weighted sum of code vectors, not one code.</b> A softmax over the codebook turns each token's logits into a probability-weighted mixture of codebook embeddings. Per-token uncertainty features (entropy, confidence, margin, top-K mass) preserve how peaked or spread the distribution is.</p>
       </div>
-      <div class="card compact">
-        <div class="kicker">LC &middot; Logit Calibration</div>
+      <div class="card compact c-lc">
+        <div class="kicker"><span class="abbr">LC</span><span class="kname">Logit Calibration</span></div>
         <p class="one">How do we train without running the VLM on every image?</p>
-        <p>Training uses proxy logits from the VQ-VAE encoder, which are far flatter than the VLM's. A gradient-free calibration aligns their distributional statistics with those of the VLM's logits, reducing the conditioning mismatch between training and inference.</p>
-        <p class="why-note"><b>Why it matters.</b> Logit calibration enables decoder training using only VQ-VAE encoder outputs, without running the frozen VLM over the training dataset.</p>
+        <p><b>Train without the VLM.</b> Training uses proxy logits from the VQ-VAE encoder, which are far flatter than the VLM's. A gradient-free calibration aligns their distributional statistics with those of the VLM's logits, reducing the conditioning mismatch between training and inference.</p>
+        <p class="why-note"><b class="t-lc">Why it matters.</b> Logit calibration enables decoder training using only VQ-VAE encoder outputs, without running the frozen VLM over the training dataset.</p>
       </div>
-      <div class="card compact">
-        <div class="kicker">DD &middot; Diffusion Decoder</div>
+      <div class="card compact c-dd">
+        <div class="kicker"><span class="abbr">DD</span><span class="kname">Diffusion Decoder</span></div>
         <p class="one">What renders the final image?</p>
-        <p>A pre-trained FLUX.1-Fill model fine-tuned to render images from the code vectors and uncertainty maps. The decoder uses only VLM-derived token distributions, without direct text conditioning, to enhance visual fidelity while preserving the VLM's intended semantics.</p>
+        <p><b>FLUX.1-Fill, fine-tuned on these features.</b> The decoder renders the image from the code vectors and uncertainty maps. It receives no text prompt, only the VLM-derived token distributions, so it sharpens the image while preserving the VLM's intended semantics.</p>
       </div>
+    </div>
+
+    <h3 class="sub-h">What each component adds</h3>
+    <p class="sec-intro">ImageNet-1K reconstruction with decoders trained for 10K steps. Same image, same tokens; only the conditioning pipeline differs.</p>
+    <div class="comp-grid">
+      <figure class="comp"><img src="static/images/components/a.jpg" alt="Diffusion decoder conditioned on one code per token"><figcaption><b><span class="t-dd">Diffusion decoder</span> only</b><span>One code per token: noisy, broken textures.</span></figcaption></figure>
+      <figure class="comp"><img src="static/images/components/b.jpg" alt="DCDD without logit calibration"><figcaption><b>+ <span class="t-lcdm">LCDM</span>, without <span class="t-lc">LC</span></b><span>Structure returns; contrast and color noise remain.</span></figcaption></figure>
+      <figure class="comp ours"><img src="static/images/components/c.jpg" alt="Full DCDD"><figcaption><b>Full DCDD</b><span>Stable color tones, noise suppressed.</span></figcaption></figure>
+      <figure class="comp gt"><img src="static/images/components/d.jpg" alt="Ground truth"><figcaption><b>Ground truth</b><span>Reference image.</span></figcaption></figure>
     </div>
   </div>
 </section>
@@ -200,29 +250,55 @@
     </div>
 
     <h3 class="why-h">Why does DCDD work?</h3>
-    <p class="sec-intro">The improvement comes not only from diffusion-based decoding, but also from preserving the VLM's distributional information.</p>
+    <p class="sec-intro">Janus-Pro 7B, MJHQ-30K gFID &darr;. The improvement comes not only from diffusion-based decoding, but also from preserving the VLM's distributional information.</p>
 
-    <div class="why-item">
-      <h4>1. The full distribution matters</h4>
-      <div class="fid-tiles" role="img" aria-label="MJHQ-30K generation FID: native VQ-VAE decoder 14.29, diffusion decoder with argmax codes 11.08, DCDD with full logits 9.42">
-        <div class="tile"><div class="t-lab">Native VQ-VAE</div><div class="t-num">14.29</div><div class="t-sub">Hard token decoding</div></div>
-        <div class="tile"><div class="t-lab">Diffusion + argmax</div><div class="t-num">11.08</div><div class="t-sub">Diffusion prior only</div></div>
-        <div class="tile ours"><div class="t-lab">DCDD (full logits)</div><div class="t-num">9.42</div><div class="t-sub">Distribution conditioning</div></div>
+    <div class="why-main">
+      <h4>1. Is the gain from the diffusion prior, or from the logit distribution?</h4>
+      <p class="sub">Same decoder and data; only the conditioning changes: one sampled token vs. full logits.</p>
+      <div class="hb" role="img" aria-label="MJHQ-30K generation FID: VQ-VAE decoder 14.29; diffusion decoder conditioned on one sampled token 11.08, 22% lower; DCDD conditioned on the logit distribution 9.42, a further 15% lower">
+        <span class="hl">VQ-VAE decoder <small>(hard tokens)</small></span><div class="ht"><i style="width:100%"></i></div><span class="hv">14.29</span>
+        <span class="hl">+ diffusion prior <small>(sampled token)</small></span><div class="ht"><i style="width:52.7%"></i></div><span class="hv">11.08 <small>&minus;22%</small></span>
+        <span class="hl ours">+ logit distribution <small>(DCDD)</small></span><div class="ht o"><i style="width:28.3%"></i></div><span class="hv ours">9.42 <small>&minus;15% more</small></span>
       </div>
-      <div class="tile-cap">MJHQ-30K generation FID &darr; (lower is better). The two diffusion variants share the same decoder, initialization, training data, and schedule; only the conditioning differs.</div>
-      <p>Conditioning on the full distribution improves generation fidelity beyond what diffusion-based decoding alone achieves: a further 15% reduction in gFID and 36% in ImageNet-1K rFID relative to the argmax-conditioned decoder.</p>
+      <p class="punch">Full logits give a further <span>15% gFID</span> reduction beyond the diffusion prior alone.</p>
+      <p class="detail">MJHQ-30K generation FID (lower is better). The two diffusion variants share the same decoder, initialization, training data, and schedule; only the conditioning differs. Conditioning on the full distribution improves generation fidelity beyond what diffusion-based decoding alone achieves: a further 15% reduction in gFID and 36% in ImageNet-1K rFID relative to the decoder conditioned on a single sampled token.</p>
     </div>
 
-    <div class="why-grid">
-      <div class="why-item">
-        <h4>2. Information beyond the top-1 token matters</h4>
-        <p>Using only the top-2 codebook entries recovers 76% of the improvement from argmax to full-distribution conditioning, consistent with our Otsu-based analysis showing that capable VLMs assign meaningful probability to multiple tokens.</p>
+    <div class="two">
+      <div class="box">
+        <h4>2. How much of the distribution is needed?</h4>
+        <p class="sub">Condition on only each token&rsquo;s top-k logits.</p>
+        <div class="vb" role="img" aria-label="MJHQ-30K Animals gFID with top-k conditioning: top-1 33.2, top-2 27.1, top-8 25.6, full distribution 25.1">
+          <div class="vbar"><span class="v">33.2</span><div class="t"><i style="height:100%"></i></div><span class="l">Top-1</span></div>
+          <div class="vbar"><span class="v">27.1</span><div class="t"><i style="height:53.8%"></i></div><span class="l">Top-2</span></div>
+          <div class="vbar"><span class="v">25.6</span><div class="t"><i style="height:42.4%"></i></div><span class="l">Top-8</span></div>
+          <div class="vbar o"><span class="v">25.1</span><div class="t"><i style="height:38.6%"></i></div><span class="l">Full</span></div>
+        </div>
+        <p class="pb">Even top-2 recovers 76% of the full-distribution gain; the full distribution is best. <span class="mini">gFID &darr;, MJHQ-30K Animals</span></p>
+        <p class="detail">Using only the top-2 codebook entries recovers 76% of the improvement from sampled-token to full-distribution conditioning, consistent with our Otsu-based analysis showing that capable VLMs assign meaningful probability to multiple tokens.</p>
       </div>
-      <div class="why-item">
-        <h4>3. Better fidelity without reinterpreting the prompt</h4>
-        <p>Compared with image-space refinement using FLUX.1-Kontext on the VQ-VAE output, DCDD achieves lower gFID (9.42 vs. 10.67) and higher CLIP-I consistency with the VLM's intended content (0.909 vs. 0.875).</p>
+      <div class="box">
+        <h4>3. Better than image-to-image refinement</h4>
+        <div class="i2i" role="img" aria-label="Same VLM output decoded four ways: VQ-VAE decoder, image-to-image refinement with a generic prompt, image-to-image refinement with the original prompt, and DCDD">
+          <span class="ql vq">VQ-VAE decoder</span><span class="ql">I2I, generic prompt</span><span class="ql">I2I + own prompt</span><span class="ql ours">DCDD (ours)</span>
+          <img src="static/images/i2i/0.jpg" alt=""><img src="static/images/i2i/1.jpg" alt=""><img src="static/images/i2i/2.jpg" alt=""><img class="ours" src="static/images/i2i/3.jpg" alt="">
+          <span class="qn">VLM&rsquo;s intent</span><span class="qn bad">content added</span><span class="qn bad">style changed</span><span class="qn good">intent kept, sharper</span>
+        </div>
+        <div class="mini-table table-wrap">
+          <table>
+            <thead><tr><th>MJHQ-30K</th><th>gFID &darr;</th><th>CLIP-I &uarr;</th></tr></thead>
+            <tbody>
+              <tr><td>FLUX.1-Kontext, generic prompt</td><td>10.67</td><td>0.875</td></tr>
+              <tr><td>FLUX.1-Kontext + own prompt</td><td>10.98</td><td>0.853</td></tr>
+              <tr class="ours"><td>DCDD</td><td class="best">9.42</td><td class="best">0.909</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="pb">Refiners drift from the VLM&rsquo;s intent; DCDD keeps it.</p>
+        <p class="detail">Compared with image-space refinement using FLUX.1-Kontext on the VQ-VAE output, DCDD achieves lower gFID (9.42 vs. 10.67) and higher CLIP-I consistency with the VLM's intended content (0.909 vs. 0.875).</p>
       </div>
     </div>
+
   </div>
 </section>
 
